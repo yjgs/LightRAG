@@ -34,6 +34,8 @@ from lightrag.utils import (
 
 from lightrag.api import __api_version__
 
+import json
+
 import numpy as np
 import base64
 from typing import Any, Union
@@ -711,6 +713,14 @@ async def openai_complete_if_cache(
                 # Handle regular content responses
                 content = getattr(message, "content", None)
                 reasoning_content = getattr(message, "reasoning_content", "")
+                # Fallback for reasoning models that may omit the final
+                # `content` (Qwen returns `reasoning`, DeepSeek returns
+                # `reasoning_content`); avoids the empty-content failure when
+                # only reasoning was returned. Priority: content >
+                # reasoning_content > reasoning.
+                reasoning = getattr(message, "reasoning", "")
+                content = content or reasoning_content
+                content = content or reasoning
 
                 # Handle COT logic for non-streaming responses (only if enabled)
                 final_content = ""
@@ -745,6 +755,25 @@ async def openai_complete_if_cache(
                 else:
                     # COT disabled, only use regular content
                     final_content = content or ""
+
+                # Log the raw LLM response so reasoning-only / mixed-field
+                # returns (content / reasoning_content / reasoning) are
+                # visible; frequent reasoning-only hits signal a model or
+                # config issue upstream. Serialization must never break the
+                # main flow: on failure fall back to str() and note the cause.
+                try:
+                    raw = json.dumps(
+                        response.model_dump()
+                        if hasattr(response, "model_dump")
+                        else str(response),
+                        ensure_ascii=False,
+                    )
+                except Exception as e:
+                    raw = str(response)
+                    logger.debug(
+                        f"LLM response serialization failed, using str(): {e}"
+                    )
+                logger.warning(f"LLM Result: {raw[:2000]}")
 
                 # Validate final content
                 if not final_content or final_content.strip() == "":
