@@ -6198,6 +6198,7 @@ class PGDocStatusStorage(DocStatusStorage):
         page_size: int = 50,
         sort_field: str = "updated_at",
         sort_direction: str = "desc",
+        search: str | None = None,
     ) -> tuple[list[tuple[str, DocProcessingStatus]], int]:
         """Get documents with pagination support
 
@@ -6207,6 +6208,12 @@ class PGDocStatusStorage(DocStatusStorage):
             page_size: Number of documents per page (10-200)
             sort_field: Field to sort by ('created_at', 'updated_at', 'id')
             sort_direction: Sort direction ('asc' or 'desc')
+            search: Case-insensitive substring filter on file_path / id;
+                None or empty string disables filtering
+
+        Note:
+            IMPLEMENTED but NOT TESTED (no local PG environment); verify
+            after a PG-backed deployment.
 
         Returns:
             Tuple of (list of (doc_id, DocProcessingStatus) tuples, total_count)
@@ -6261,6 +6268,24 @@ class PGDocStatusStorage(DocStatusStorage):
             params["status_filters"] = sorted(status_filter_values)
         else:
             where_clause = "WHERE workspace=$1"
+
+        # Case-insensitive substring filter on file_path / id (search).
+        # ILIKE is natively case-insensitive; % _ \ are escaped so the input
+        # is treated as a literal substring, matching the JSON backend
+        # behaviour. Both CTEs below reuse `where_clause`, so total_count
+        # automatically reflects the filtered set.
+        if search:
+            param_count += 1
+            escaped = (
+                search.replace("\\", "\\\\")
+                .replace("%", "\\%")
+                .replace("_", "\\_")
+            )
+            params["search_pattern"] = f"%{escaped}%"
+            where_clause += (
+                f" AND (file_path ILIKE ${param_count} ESCAPE '\\' "
+                f"OR id ILIKE ${param_count} ESCAPE '\\')"
+            )
 
         # Build ORDER BY clause using validated whitelist values.
         # NULLS LAST is applied in both the inner paged CTE and the outer query so

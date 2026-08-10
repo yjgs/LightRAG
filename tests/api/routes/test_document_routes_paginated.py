@@ -49,15 +49,22 @@ class _FakeDocStatusStorage:
         page_size=50,
         sort_field="updated_at",
         sort_direction="desc",
+        search=None,
     ):
         selected_statuses = DocStatusStorage.resolve_status_filter_values(
             status_filter=status_filter,
             status_filters=status_filters,
         )
+        search_lower = search.lower() if search else None
         documents = [
             (doc_id, doc)
             for doc_id, doc in self.docs.items()
-            if selected_statuses is None or doc.status.value in selected_statuses
+            if (selected_statuses is None or doc.status.value in selected_statuses)
+            and (
+                search_lower is None
+                or search_lower in doc.file_path.lower()
+                or search_lower in doc_id.lower()
+            )
         ]
         return documents[:page_size], len(documents)
 
@@ -118,6 +125,41 @@ def test_documents_paginated_status_filters_override_status_filter():
         "parsing-doc",
         "analyzing-doc",
     ]
+
+
+def test_documents_paginated_accepts_search():
+    response = _client.post(
+        "/documents/paginated",
+        headers=_headers,
+        json={
+            "page": 1,
+            "page_size": 10,
+            "sort_field": "updated_at",
+            "sort_direction": "desc",
+            "search": "proc",
+        },
+    )
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert payload["pagination"]["total_count"] == 1
+    assert [doc["id"] for doc in payload["documents"]] == ["processed-doc"]
+
+
+def test_documents_paginated_search_too_long_returns_422():
+    response = _client.post(
+        "/documents/paginated",
+        headers=_headers,
+        json={
+            "page": 1,
+            "page_size": 10,
+            "sort_field": "updated_at",
+            "sort_direction": "desc",
+            "search": "x" * 257,
+        },
+    )
+
+    assert response.status_code == 422
 
 
 # --- internal metadata stripping ------------------------------------------

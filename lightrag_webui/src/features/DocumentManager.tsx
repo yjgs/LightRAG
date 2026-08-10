@@ -1,7 +1,9 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from 'react'
 import { useTranslation } from 'react-i18next'
 import { useSettingsStore } from '@/stores/settings'
+import { useDebounce } from '@/hooks/useDebounce'
 import Button from '@/components/ui/Button'
+import Input from '@/components/ui/Input'
 import { cn } from '@/lib/utils'
 import {
   Table,
@@ -42,7 +44,7 @@ import { toast } from 'sonner'
 import { useBackendState } from '@/stores/state'
 import { copyToClipboard } from '@/utils/clipboard'
 
-import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, AlertTriangle, Info, CopyIcon } from 'lucide-react'
+import { RefreshCwIcon, ActivityIcon, ArrowUpIcon, ArrowDownIcon, RotateCcwIcon, CheckSquareIcon, XIcon, SearchIcon, AlertTriangle, Info, CopyIcon } from 'lucide-react'
 import PipelineStatusDialog from '@/components/documents/PipelineStatusDialog'
 import {
   getStatusBucket,
@@ -355,6 +357,7 @@ type QuerySnapshot = {
   pageSize: number
   sortField: SortField
   sortDirection: SortDirection
+  search: string
 }
 type RefreshRequest =
   | {
@@ -442,6 +445,11 @@ export default function DocumentManager() {
     process: 1,
     failed: 1,
   });
+
+  // Search state: raw input is controlled; the trimmed, debounced value drives
+  // queries (typing "a " vs "a" must not re-fetch or reset pages).
+  const [searchQuery, setSearchQuery] = useState('')
+  const debouncedSearch = useDebounce(searchQuery.trim(), 300)
 
   // State for document selection
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
@@ -728,8 +736,9 @@ export default function DocumentManager() {
     page: overrides.page ?? pagination.page,
     pageSize: overrides.pageSize ?? pagination.page_size,
     sortField: overrides.sortField ?? sortField,
-    sortDirection: overrides.sortDirection ?? sortDirection
-  }), [pagination.page, pagination.page_size, sortField, sortDirection, statusFilter])
+    sortDirection: overrides.sortDirection ?? sortDirection,
+    search: overrides.search ?? debouncedSearch
+  }), [pagination.page, pagination.page_size, sortField, sortDirection, statusFilter, debouncedSearch])
 
   const buildDocumentsRequest = useCallback((
     query: QuerySnapshot,
@@ -739,7 +748,8 @@ export default function DocumentManager() {
     page,
     page_size: query.pageSize,
     sort_field: query.sortField,
-    sort_direction: query.sortDirection
+    sort_direction: query.sortDirection,
+    search: query.search
   }), [])
 
   // Utility function to update component state
@@ -1183,7 +1193,7 @@ export default function DocumentManager() {
 
   useEffect(() => {
     latestRefreshRequestVersionRef.current += 1
-  }, [pagination.page, pagination.page_size, statusFilter, sortField, sortDirection])
+  }, [pagination.page, pagination.page_size, statusFilter, sortField, sortDirection, debouncedSearch])
 
   // Monitor pipelineActive changes and trigger an immediate refresh. The
   // polling interval is reconciled by the main polling useEffect below
@@ -1317,6 +1327,24 @@ export default function DocumentManager() {
   }, [clearPollingInterval, setStatusCounts, fetchDocuments, currentTab, health, startPollingInterval])
 
 
+  // Reset pagination when the debounced search term changes. Render-time
+  // comparison (same pattern as the showFileName/selection resets below) so
+  // search changes land on page 1 with a single fetch, and all status tabs'
+  // page memory resets since their result sets change under search.
+  const [previousSearch, setPreviousSearch] = useState('')
+  if (debouncedSearch !== previousSearch) {
+    setPreviousSearch(debouncedSearch)
+    setPagination(prev => ({ ...prev, page: 1 }))
+    setPageByStatus({
+      all: 1,
+      completed: 1,
+      parse: 1,
+      analyze: 1,
+      process: 1,
+      failed: 1,
+    })
+  }
+
   // Handle showFileName change - switch sort field if currently sorting by first column.
   // Render-time comparison avoids cascading renders flagged by react-hooks/set-state-in-effect.
   const [previousShowFileName, setPreviousShowFileName] = useState(showFileName)
@@ -1330,24 +1358,27 @@ export default function DocumentManager() {
     }
   }
 
-  // Reset selection state when page, status filter, or sort changes (render-time comparison).
+  // Reset selection state when page, status filter, sort, or search changes (render-time comparison).
   const [previousSelectionDeps, setPreviousSelectionDeps] = useState({
     page: pagination.page,
     statusFilter,
     sortField,
-    sortDirection
+    sortDirection,
+    search: debouncedSearch
   })
   if (
     previousSelectionDeps.page !== pagination.page ||
     previousSelectionDeps.statusFilter !== statusFilter ||
     previousSelectionDeps.sortField !== sortField ||
-    previousSelectionDeps.sortDirection !== sortDirection
+    previousSelectionDeps.sortDirection !== sortDirection ||
+    previousSelectionDeps.search !== debouncedSearch
   ) {
     setPreviousSelectionDeps({
       page: pagination.page,
       statusFilter,
       sortField,
-      sortDirection
+      sortDirection,
+      search: debouncedSearch
     })
     setSelectedDocIds([])
   }
@@ -1365,6 +1396,7 @@ export default function DocumentManager() {
     statusFilter,
     sortField,
     sortDirection,
+    debouncedSearch,
     fetchPaginatedDocuments
   ]);
 
@@ -1540,25 +1572,48 @@ export default function DocumentManager() {
                   <RotateCcwIcon className="h-4 w-4" />
                 </Button>
               </div>
-              <div className="flex items-center gap-2">
-                <label
-                  htmlFor="toggle-filename-btn"
-                  className="text-sm text-gray-500"
-                >
-                  {t('documentPanel.documentManager.fileNameLabel')}
-                </label>
-                <Button
-                  id="toggle-filename-btn"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => setShowFileName(!showFileName)}
-                  className="border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
-                >
-                  {showFileName
-                    ? t('documentPanel.documentManager.hideButton')
-                    : t('documentPanel.documentManager.showButton')
-                  }
-                </Button>
+              <div className="flex items-center justify-between gap-2">
+                <div className="relative w-56">
+                  <SearchIcon className="pointer-events-none absolute left-2.5 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+                  <Input
+                    type="text"
+                    value={searchQuery}
+                    onChange={(e) => setSearchQuery(e.target.value)}
+                    placeholder={t('documentPanel.documentManager.searchPlaceholder')}
+                    aria-label={t('documentPanel.documentManager.searchPlaceholder')}
+                    className="h-8 pl-8 pr-8 text-sm"
+                  />
+                  {searchQuery !== '' && (
+                    <button
+                      type="button"
+                      onClick={() => setSearchQuery('')}
+                      aria-label={t('documentPanel.documentManager.searchClear')}
+                      className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground transition-colors hover:text-foreground"
+                    >
+                      <XIcon className="h-4 w-4" />
+                    </button>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  <label
+                    htmlFor="toggle-filename-btn"
+                    className="text-sm text-gray-500"
+                  >
+                    {t('documentPanel.documentManager.fileNameLabel')}
+                  </label>
+                  <Button
+                    id="toggle-filename-btn"
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowFileName(!showFileName)}
+                    className="border-gray-200 dark:border-gray-700 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    {showFileName
+                      ? t('documentPanel.documentManager.hideButton')
+                      : t('documentPanel.documentManager.showButton')
+                    }
+                  </Button>
+                </div>
               </div>
             </div>
             <CardDescription aria-hidden="true" className="hidden">{t('documentPanel.documentManager.uploadedDescription')}</CardDescription>
@@ -1568,8 +1623,12 @@ export default function DocumentManager() {
             {!docs && (
               <div className="absolute inset-0 min-h-0 p-0">
                 <EmptyCard
-                  title={t('documentPanel.documentManager.emptyTitle')}
-                  description={t('documentPanel.documentManager.emptyDescription')}
+                  title={debouncedSearch
+                    ? t('documentPanel.documentManager.searchEmptyTitle')
+                    : t('documentPanel.documentManager.emptyTitle')}
+                  description={debouncedSearch
+                    ? t('documentPanel.documentManager.searchEmptyDescription', { query: debouncedSearch })
+                    : t('documentPanel.documentManager.emptyDescription')}
                 />
               </div>
             )}

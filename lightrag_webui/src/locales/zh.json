@@ -124,6 +124,10 @@
       "uploadedDescription": "已上传文档列表及其状态",
       "emptyTitle": "无文档",
       "emptyDescription": "还没有上传任何文档",
+      "searchPlaceholder": "按文件名或文档 ID 搜索",
+      "searchClear": "清除搜索",
+      "searchEmptyTitle": "无匹配结果",
+      "searchEmptyDescription": "没有与「{{query}}」匹配的文档",
       "columns": {
         "id": "ID",
         "fileName": "文件名",

@@ -295,6 +295,7 @@ export type DocumentsRequest = {
   page_size: number
   sort_field: 'created_at' | 'updated_at' | 'id' | 'file_path'
   sort_direction: 'asc' | 'desc'
+  search?: string
 }
 
 export type PaginationInfo = {

@@ -1175,6 +1175,7 @@ class DocumentsRequest(BaseModel):
         page_size: Number of documents per page (10-200)
         sort_field: Field to sort by ('created_at', 'updated_at', 'id', 'file_path')
         sort_direction: Sort direction ('asc' or 'desc')
+        search: Case-insensitive substring filter on file_path / document id
     """
 
     status_filter: Optional[DocStatus] = Field(
@@ -1194,6 +1195,14 @@ class DocumentsRequest(BaseModel):
     sort_direction: Literal["asc", "desc"] = Field(
         default="desc", description="Sort direction"
     )
+    search: Optional[str] = Field(
+        default=None,
+        max_length=256,
+        description=(
+            "Case-insensitive substring filter matched against file_path and "
+            "document id"
+        ),
+    )
 
     model_config = ConfigDict(
         json_schema_extra={
@@ -1203,6 +1212,7 @@ class DocumentsRequest(BaseModel):
                 "page_size": 50,
                 "sort_field": "updated_at",
                 "sort_direction": "desc",
+                "search": "report",
             }
         }
     )
@@ -6428,6 +6438,7 @@ def create_document_routes(
                         page_size=request.page_size,
                         sort_field=request.sort_field,
                         sort_direction=request.sort_direction,
+                        search=request.search,
                     ),
                 )
             )

@@ -373,6 +373,7 @@ class JsonDocStatusStorage(DocStatusStorage):
         page_size: int = 50,
         sort_field: str = "updated_at",
         sort_direction: str = "desc",
+        search: str | None = None,
     ) -> tuple[list[tuple[str, DocProcessingStatus]], int]:
         """Get documents with pagination support
 
@@ -382,6 +383,8 @@ class JsonDocStatusStorage(DocStatusStorage):
             page_size: Number of documents per page (10-200)
             sort_field: Field to sort by ('created_at', 'updated_at', 'id')
             sort_direction: Sort direction ('asc' or 'desc')
+            search: Case-insensitive substring filter on file_path / document
+                id; None or empty string disables filtering
 
         Returns:
             Tuple of (list of (doc_id, DocProcessingStatus) tuples, total_count)
@@ -390,6 +393,10 @@ class JsonDocStatusStorage(DocStatusStorage):
             status_filter=status_filter,
             status_filters=status_filters,
         )
+
+        # Case-insensitive substring filter on file_path / doc_id.
+        # None or "" disables filtering.
+        search_lower = search.lower() if search else None
 
         # Validate parameters
         if page < 1:
@@ -429,6 +436,13 @@ class JsonDocStatusStorage(DocStatusStorage):
                     and doc_data.get("status") not in status_filter_values
                 ):
                     continue
+                if search_lower is not None:
+                    file_path_lower = (doc_data.get("file_path") or "").lower()
+                    if (
+                        search_lower not in file_path_lower
+                        and search_lower not in doc_id.lower()
+                    ):
+                        continue
                 # Validate via a real (throwaway) construction attempt rather
                 # than checking a fixed set of required-field names: a row
                 # with an extra/unexpected field fails construction too, and

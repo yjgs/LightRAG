@@ -2015,8 +2015,12 @@ class OpenSearchDocStatusStorage(DocStatusStorage):
         page_size: int = 50,
         sort_field: str = "updated_at",
         sort_direction: str = "desc",
+        search: str | None = None,
     ) -> tuple[list[tuple[str, DocProcessingStatus]], int]:
-        """Get documents with pagination using PIT + search_after."""
+        """Get documents with pagination using PIT + search_after.
+
+        Note: ``search`` is accepted for API compatibility but NOT
+        IMPLEMENTED yet (TODO: pass through to the backend filter)."""
         if not self._index_ready:
             return [], 0
         status_filter_values = self.resolve_status_filter_values(

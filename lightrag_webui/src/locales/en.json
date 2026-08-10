@@ -124,6 +124,10 @@
       "uploadedDescription": "List of uploaded documents and their statuses.",
       "emptyTitle": "No Documents",
       "emptyDescription": "There are no uploaded documents yet.",
+      "searchPlaceholder": "Search by file name or document ID",
+      "searchClear": "Clear search",
+      "searchEmptyTitle": "No Matches",
+      "searchEmptyDescription": "No documents match \"{{query}}\"",
       "columns": {
         "id": "ID",
         "fileName": "File Name",
