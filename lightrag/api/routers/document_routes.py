@@ -2574,13 +2574,17 @@ _STRATEGY_TO_PROCESS_OPTION: Dict[str, str] = {
 
 
 def _resolve_text_chunking(
-    chunking: Optional[TextChunkingConfig], rag: LightRAG
+    chunking: Optional[TextChunkingConfig],
+    rag: LightRAG,
+    file_source: str | None = None,
 ) -> tuple[str, dict]:
     """Freeze a ``chunking`` request into ``(process_options, chunk_options)``.
 
-    When ``chunking`` is ``None`` this reproduces today's behavior exactly:
-    fixed-token strategy with the snapshot built from
-    ``rag.addon_params['chunker']``.
+    When ``chunking`` is ``None`` the strategy is resolved from
+    ``file_source`` via the same LIGHTRAG_PARSER rules the file-upload path
+    uses (so text ingestion honors per-type config, e.g. ``*:legacy-V``);
+    falls back to fixed-token when no rule matches or no file_source is
+    given.
 
     Otherwise the validated, strategy-specific params are merged into the
     selected strategy's sub-dict. ``chunk_token_size`` rides along inside
@@ -2600,9 +2604,20 @@ def _resolve_text_chunking(
             background work is scheduled.
     """
     if chunking is None:
-        # No request-driven config: reproduce today's behavior verbatim,
-        # including not introducing new validation on the default path.
+        # No request-driven config: resolve per-type LIGHTRAG_PARSER rules by
+        # file_source extension (mirrors the upload path), falling back to
+        # fixed-token when nothing matches.
         process_options = PROCESS_OPTION_CHUNK_FIXED
+        if file_source:
+            try:
+                directives = resolve_parser_directives(
+                    file_source, require_external_endpoint=False
+                )
+                if directives.process_options:
+                    process_options = directives.process_options
+            except Exception:
+                # Rule resolution must never break ingestion: fall back.
+                pass
         return process_options, resolve_chunk_options(
             rag.addon_params, process_options=process_options
         )
@@ -2723,7 +2738,9 @@ async def pipeline_index_texts(
     if len(set(normalized_file_sources)) != len(normalized_file_sources):
         raise ValueError("File sources must be unique by filename")
 
-    process_options, chunk_options = _resolve_text_chunking(chunking, rag)
+    process_options, chunk_options = _resolve_text_chunking(
+        chunking, rag, file_sources[0] if file_sources else None
+    )
     enqueue_kwargs: dict[str, Any] = {
         "input": texts,
         "file_paths": normalized_file_sources,
@@ -5359,7 +5376,7 @@ def create_document_routes(
             # scheduled. pipeline_index_texts re-resolves from the same
             # addon_params inside the task.
             try:
-                _resolve_text_chunking(request.chunking, rag)
+                _resolve_text_chunking(request.chunking, rag, request.file_source)
             except ValueError as exc:
                 # Controlled chunking-config validation message (numeric sizes
                 # only, no internal detail); kept as client-facing 422 feedback
@@ -5514,7 +5531,10 @@ def create_document_routes(
             # background work is scheduled. pipeline_index_texts re-resolves
             # from the same addon_params inside the task.
             try:
-                _resolve_text_chunking(request.chunking, rag)
+                _resolve_text_chunking(
+                    request.chunking, rag,
+                    request.file_sources[0] if request.file_sources else None,
+                )
             except ValueError as exc:
                 # Controlled chunking-config validation message (numeric sizes
                 # only, no internal detail); kept as client-facing 422 feedback
